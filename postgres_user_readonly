@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# Check if all required arguments are provided
+if [ $# -ne 5 ]; then
+    echo "Usage: $0 <username> <password> <database> <schema>"
+    exit 1
+fi
+
+username=$1
+password=$2
+database=$3
+schema=$4
+
+# Execute SQL commands using psql
+sudo -u postgres psql << EOF
+CREATE USER $username WITH PASSWORD '$password';
+GRANT CONNECT ON DATABASE $database TO $username;
+GRANT USAGE ON SCHEMA $schema TO $username;
+GRANT SELECT ON ALL TABLES IN SCHEMA $schema TO $username;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA $schema
+   GRANT SELECT ON TABLES TO $username;
+EOF
+
+echo "Read-only user '$username' provisioned successfully."
