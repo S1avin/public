@@ -18,3 +18,18 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA data
 EOF
 
 echo "User '$username' provisioned successfully."
+
+
+#!/bin/bash
+
+# Grant read/write access to new user "joe" for database "thisdb" and schema "thisschema"
+psql -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA thisschema TO joe;" thisdb
+
+#!/bin/bash
+
+# Create new user with username and password as parameters
+psql -c "CREATE ROLE $1 WITH LOGIN PASSWORD '$2';" thisdb
+
+# Grant connect and read/write access to new user "joe" for database "thisdb" and schema "thisschema"
+psql -c "GRANT CONNECT ON DATABASE thisdb TO $1;" thisdb
+psql -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA thisschema TO $1;" thisdb
