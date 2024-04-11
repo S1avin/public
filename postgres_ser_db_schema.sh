@@ -15,6 +15,8 @@ schema=$4
 sudo -u postgres psql << EOF
 CREATE USER $username WITH PASSWORD '$password';
 GRANT CONNECT ON DATABASE $database TO $username;
+GRANT USAGE ON SCHEMA $schema TO $username;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA data TO $username;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA $schema
    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $username;
 EOF
