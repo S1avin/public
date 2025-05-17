@@ -1,0 +1,80 @@
+local.file_match "system" {                                                                                                                                                                                                                                                                                                  
+  path_targets = [{                                                                                                                                                                                                                                                                                                          
+    __address__ = "localhost",                                                                                                                                                                                                                                                                                               
+    __path__    = "/var/log/{dnf.log,maillog,messages,secure,cron,sudo.log,sssd/sssd_default.log}",                                                                                                                                                                                                                          
+    job         = "OSlogs",                                                                                                                                                                                                                                                                                                  
+  }]                                                                                                                                                                                                                                                                                                                         
+}
+
+loki.source.file "system" {
+  targets                = local.file_match.system.targets
+  forward_to             = [loki.write.default.receiver]
+  legacy_positions_file  = "/tmp/positions.yaml"
+}
+
+discovery.relabel "syslog_receiver" {
+  targets = []
+
+  rule {
+    source_labels = ["__syslog_message_hostname"]
+    target_label  = "hostname"
+  }
+
+  rule {
+    source_labels = ["__syslog_message_severity"]
+    target_label  = "level"
+  }
+
+  rule {
+    source_labels = ["__syslog_message_facility"]
+    target_label  = "syslog_facility"
+  }
+
+  rule {
+    source_labels = ["__syslog_message_app_name"]
+    target_label  = "syslog_identifier"
+  }
+}
+
+loki.source.syslog "syslog_receiver" {
+  listener {
+    address              = "127.0.0.1:1514"
+    protocol             = "tcp"
+    idle_timeout         = "1m"
+    label_structured_data = true
+    labels = {
+      job = "syslog-receiver",
+    }
+    use_incoming_timestamp = true
+    max_message_length     = 0
+  }
+
+  forward_to   = [loki.write.default.receiver]
+  relabel_rules = discovery.relabel.syslog_receiver.rules
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://localhost:3100/loki/api/v1/push"
+  }
+  external_labels = {}
+}
+
+prometheus.exporter.unix "local_system" { }
+
+prometheus.scrape "scrape_metrics" {
+  targets         = prometheus.exporter.unix.local_system.targets
+  forward_to      = [prometheus.remote_write.metrics_service.receiver]
+  scrape_interval = "10s"
+}
+
+prometheus.remote_write "metrics_service" {
+    endpoint {
+        url = "http://localhost:9090/api/v1/write"
+
+        // basic_auth {
+        //   username = "admin"
+        //   password = "admin"
+        // }
+    }
+}
