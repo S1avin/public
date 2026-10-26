@@ -1,0 +1,360 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: system-resources
+    folder: System Alerts
+    interval: 1m
+    rules:
+      - uid: disk-usage-high
+        title: Disk usage above 90%
+        condition: C
+        for: 5m
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: >-
+                100 * (1 - (
+                  node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs|nfs.*"}
+                  /
+                  node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|devtmpfs|nfs.*"}
+                ))
+              instant: true
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [90]
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    type: last
+                  type: query
+              refId: C
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Disk usage high on {{ $labels.instance }}'
+          description: '{{ $labels.mountpoint }} on {{ $labels.instance }} is {{ $values.A.Value | printf "%.1f" }}% full (threshold 90%).'
+
+      - uid: cpu-usage-high
+        title: CPU usage above 90% for 10m
+        condition: C
+        for: 10m
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: >-
+                100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])))
+              instant: true
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [90]
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    type: last
+                  type: query
+              refId: C
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: 'CPU usage high on {{ $labels.instance }}'
+          description: 'CPU on {{ $labels.instance }} has been at {{ $values.A.Value | printf "%.1f" }}% for at least 10 minutes (threshold 90%).'
+
+      - uid: ram-usage-high
+        title: RAM usage above 90% for 10m
+        condition: C
+        for: 10m
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: >-
+                100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))
+              instant: true
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [90]
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    type: last
+                  type: query
+              refId: C
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: 'RAM usage high on {{ $labels.instance }}'
+          description: 'RAM on {{ $labels.instance }} has been at {{ $values.A.Value | printf "%.1f" }}% for at least 10 minutes (threshold 90%).'
+
+  # Log-based alerts. Loki datasourceUid is the auto-assigned uid of the provisioned
+  # "Loki" datasource; the error/ignore regexes mirror the $errors / $ignore defaults
+  # in dash/logs.json, so keep them in sync.
+  - orgId: 1
+    name: logs
+    folder: System Alerts
+    interval: 1m
+    rules:
+      - uid: log-errors-spike
+        title: Log errors spiking
+        condition: C
+        for: 5m
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 86400
+              to: 0
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              editorMode: code
+              # 15m error count, kept only where it is > 3x the host's 24h average per 15m
+              expr: >-
+                sum by (host) (count_over_time({host=~".+", filename=~".*[^0-9]"}
+                  |~ `(?i)(error|fail|fatal|panic|crit|denied|segfault|oom-kill|out of memory)`
+                  !~ `(?i)(?:reviving: failed for|mismatched repomd|perl-Error|Importing GPG key|Invoked with|augenrules.*failure [0-9]|level=info|level=debug|Installed: |Upgraded: |Erased: )` [15m]))
+                > 3 * (sum by (host) (count_over_time({host=~".+", filename=~".*[^0-9]"}
+                  |~ `(?i)(error|fail|fatal|panic|crit|denied|segfault|oom-kill|out of memory)`
+                  !~ `(?i)(?:reviving: failed for|mismatched repomd|perl-Error|Importing GPG key|Invoked with|augenrules.*failure [0-9]|level=info|level=debug|Installed: |Upgraded: |Erased: )` [1d])) / 96)
+              queryType: instant
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [20]
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    type: last
+                  type: query
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Log errors spiking on {{ $labels.host }}'
+          description: '{{ $labels.host }} logged {{ $values.A.Value | printf "%.0f" }} error lines in 15m, more than 3x its 24h average. See the Logs dashboard.'
+
+      - uid: log-shipper-silent
+        title: Log shipper silent
+        condition: C
+        for: 5m
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: >-
+                count by (instance) (alloy_build_info offset 30m)
+                unless count by (instance) (alloy_build_info)
+              instant: true
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    type: last
+                  type: query
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: 'No logs or metrics from {{ $labels.instance }}'
+          description: 'Alloy on {{ $labels.instance }} stopped reporting: the host is down or Alloy is not running.'
+
+      - uid: log-shipper-dropping
+        title: Log shipper dropping lines
+        condition: C
+        for: 0s
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: sum by (instance) (increase(loki_write_dropped_entries_total[15m]))
+              instant: true
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    type: last
+                  type: query
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Alloy on {{ $labels.instance }} is dropping log lines'
+          description: '{{ $values.A.Value | printf "%.0f" }} log lines dropped in 15m; Loki may be unreachable or rejecting writes.'
+
+      - uid: log-kernel-errors
+        title: Kernel / OOM / disk errors
+        condition: C
+        for: 0s
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              editorMode: code
+              expr: >-
+                sum by (host) (count_over_time({host=~".+", filename=~".*/messages"}
+                  |~ `(?i)(out of memory|oom-kill|segfault|i/o error|read-only file system|call trace|blocked for more than|soft lockup|hardware error|ext4-fs error|xfs.*(error|corrupt))` [5m]))
+              queryType: instant
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    type: last
+                  type: query
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Kernel / OOM / disk errors on {{ $labels.host }}'
+          description: '{{ $values.A.Value | printf "%.0f" }} kernel, OOM, I/O or filesystem error lines in /var/log/messages in the last 5m.'
+
+      - uid: log-auth-bruteforce
+        title: Many failed logins
+        condition: C
+        for: 0s
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: P8E80F9AEF21F6940
+            model:
+              editorMode: code
+              expr: >-
+                sum by (host) (count_over_time({host=~".+", filename=~".*/secure"}
+                  |~ `(?i)(failed password|invalid user|authentication failure|password check failed|maximum authentication attempts)` [5m]))
+              queryType: instant
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [20]
+                  operator:
+                    type: and
+                  query:
+                    params: []
+                  reducer:
+                    type: last
+                  type: query
+              refId: C
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Many failed logins on {{ $labels.host }}'
+          description: '{{ $values.A.Value | printf "%.0f" }} failed login attempts in 5m in /var/log/secure.'
