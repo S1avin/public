@@ -1,80 +1,70 @@
-local.file_match "system" {                                                                                                                                                                                                                                                                                                  
-  path_targets = [{                                                                                                                                                                                                                                                                                                          
-    __address__ = "localhost",                                                                                                                                                                                                                                                                                               
-    __path__    = "/var/log/{dnf.log,maillog,messages,secure,cron,sudo.log,sssd/sssd_default.log}",                                                                                                                                                                                                                          
-    job         = "OSlogs",                                                                                                                                                                                                                                                                                                  
-  }]                                                                                                                                                                                                                                                                                                                         
+// /opt/monitor/alloy/allloy-config.alloy
+
+// ---------- Logs: /var/log/* -> Loki ----------
+local.file_match "varlog" {
+  path_targets = [{
+    __path__ = "/var/log/*",
+    job      = "varlog",
+    host     = constants.hostname,
+  }]
+
+  // skip binary and rotated/compressed files
+//  exclude_paths = [
+//    "/var/log/wtmp",
+//    "/var/log/btmp",
+//    "/var/log/lastlog",
+//    "/var/log/*.gz",
+//    "/var/log/*.xz",
+//   "/var/log/*.bz2",
+//    "/var/log/*.zip",
+//   "/var/log/*-[0-9]*",
+//  ]
 }
 
-loki.source.file "system" {
-  targets                = local.file_match.system.targets
-  forward_to             = [loki.write.default.receiver]
-  legacy_positions_file  = "/tmp/positions.yaml"
+loki.source.file "varlog" {
+  targets    = local.file_match.varlog.targets
+  forward_to = [loki.write.monitor.receiver]
 }
 
-discovery.relabel "syslog_receiver" {
-  targets = []
-
-  rule {
-    source_labels = ["__syslog_message_hostname"]
-    target_label  = "hostname"
-  }
-
-  rule {
-    source_labels = ["__syslog_message_severity"]
-    target_label  = "level"
-  }
-
-  rule {
-    source_labels = ["__syslog_message_facility"]
-    target_label  = "syslog_facility"
-  }
-
-  rule {
-    source_labels = ["__syslog_message_app_name"]
-    target_label  = "syslog_identifier"
-  }
-}
-
-loki.source.syslog "syslog_receiver" {
-  listener {
-    address              = "127.0.0.1:1514"
-    protocol             = "tcp"
-    idle_timeout         = "1m"
-    label_structured_data = true
-    labels = {
-      job = "syslog-receiver",
-    }
-    use_incoming_timestamp = true
-    max_message_length     = 0
-  }
-
-  forward_to   = [loki.write.default.receiver]
-  relabel_rules = discovery.relabel.syslog_receiver.rules
-}
-
-loki.write "default" {
+loki.write "monitor" {
   endpoint {
-    url = "http://localhost:3100/loki/api/v1/push"
+    url = "http://monitor:3100/loki/api/v1/push"
   }
-  external_labels = {}
 }
 
-prometheus.exporter.unix "local_system" { }
-
-prometheus.scrape "scrape_metrics" {
-  targets         = prometheus.exporter.unix.local_system.targets
-  forward_to      = [prometheus.remote_write.metrics_service.receiver]
-  scrape_interval = "10s"
+// ---------- Metrics -> Prometheus (remote write) ----------
+prometheus.exporter.unix "node" {
+  enable_collectors = ["systemd"]
 }
 
-prometheus.remote_write "metrics_service" {
-    endpoint {
-        url = "http://localhost:9090/api/v1/write"
-
-        // basic_auth {
-        //   username = "admin"
-        //   password = "admin"
-        // }
-    }
+prometheus.scrape "node" {
+  targets         = prometheus.exporter.unix.node.targets
+  forward_to      = [prometheus.relabel.host.receiver]
+  scrape_interval = "15s"
 }
+
+// Alloy's own metrics
+prometheus.exporter.self "alloy" { }
+
+prometheus.scrape "alloy" {
+  targets         = prometheus.exporter.self.alloy.targets
+  forward_to      = [prometheus.relabel.host.receiver]
+  scrape_interval = "15s"
+}
+
+// Normalize instance label to the real hostname
+prometheus.relabel "host" {
+  forward_to = [prometheus.remote_write.monitor.receiver]
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+}
+
+prometheus.remote_write "monitor" {
+  endpoint {
+    url = "http://monitor:9090/api/v1/write"
+  }
+}
+
